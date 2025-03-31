@@ -40,12 +40,9 @@ class Operator(Enum):
 
 
 class QueryType(Enum):
-    SELECT = "INDEX ONLY SCAN",
-    FROM = "FROM",
+    SELECT = "SCAN",
     JOIN = "JOIN",
-    WHERE = "SEQ SCAN",
     ORDER = "SORT",
-    GROUP = "GROUP",
     LIMIT = "LIMIT",
     AGGREGATE = "AGGREGATE",
 
@@ -66,84 +63,65 @@ class QueryType(Enum):
 #      Parse Queries and helper methods
 # -------------------------------------------
 
-def parse_query(query_dict: dict):
-    '''
-    Parse Query parses the sanitized dictionary of queries and returns the pipe syntax
-    :param query_dict:
-    :return:
-    '''
-    order = []
-    aggregate_dict = {}
-    for query_string in query_dict:
-        query, aggregate_query = sanitize_query(query_string)
-        print(query, aggregate_query)
-        if aggregate_query is not None:
-            aggregate_dict.update({aggregate_query: None})
+
+class Parser:
+
+    __default_syntax = "|>"
+
+
+    @staticmethod
+    def parse_query(query_list: list) -> list:
+        '''
+        Parse Query parses the sanitized dictionary of queries and returns the pipe syntax
+        :param query_list:
+        :return:
+        '''
+        order = []
+        for query in query_list:
+            order.append(Parser.sanitize_query(query))
+        return order
+
+    @staticmethod
+    def sanitize_query(query_dict: dict) -> str:
+        '''
+        Sanitize the query and force the enumeration into the respective query type
+        :param query_dict: Dictionary which contains the variables and dictionary
+        :return: A string which output the parsed statement
+        '''
+        # Retrieve the key
+        query_key = next(iter(query_dict))
+        query = QueryType(query_key)
+        query_params = query_dict.get(query_key)
+        pipe_syntax = ""
         match query:
             case QueryType.SELECT:
-                continue
-            case QueryType.FROM:
-                continue
+                pipe_syntax = Parser.__parse_select_statement(query_params)
             case QueryType.JOIN:
-                continue
+                pipe_syntax = Parser.__parse_join_statement(query_params)
+            case QueryType.ORDER:
+                pipe_syntax = Parser.__parse_order_statement(query_params)
             case QueryType.LIMIT:
-                continue
+                pipe_syntax = Parser.__parse_limit_statement(query_params)
             case QueryType.AGGREGATE:
-                order.extend(match_aggregate(aggregate_dict))
-            case _:
-                continue
+                pipe_syntax = Parser.__parse_aggregate_statement(query_params)
+        return pipe_syntax
 
+    @classmethod
+    def __parse_select_statement(cls, query_params) -> str:
+        return Parser.__default_syntax
 
-def sanitize_query(query_string):
-    '''
-    Sanitize the query and force the enumeration into the respective query type
-    :param query_string: String of the query
-    :return: A tuple of enum QueryType and enum Aggregate
-    '''
-    try:
-        aggregate_query = Aggregate(query_string)
-    except ValueError:
-        aggregate_query = None
-    if aggregate_query is not None:
-        query_string = QueryType.AGGREGATE
-    query = QueryType(query_string)
-    return {query, aggregate_query}
+    @classmethod
+    def __parse_join_statement(cls, query_params: dict) -> str:
+        return Parser.__default_syntax
 
+    @classmethod
+    def __parse_order_statement(cls, query_params: dict) -> str:
+        return Parser.__default_syntax
 
-def match_aggregate(aggregate_dict):
-    '''
+    @classmethod
+    def __parse_limit_statement(cls, query_params: dict) -> str:
+        return Parser.__default_syntax
 
-    :param aggregate_dict:
-    :return:
-    '''
-    aggregate_list = []
-    for aggregate in aggregate_dict:
-        match aggregate:
-            case Aggregate.COUNT:
-                continue
-            case Aggregate.SUM:
-                continue
-            case Aggregate.AVG:
-                continue
-            case Aggregate.MIN:
-                continue
-            case Aggregate.MAX:
-                continue
-            case Aggregate.FIRST:
-                continue
-            case Aggregate.LAST:
-                continue
-            case Aggregate.MEDIAN:
-                continue
-            case Aggregate.MODE:
-                continue
-            case _:
-                continue
-    return aggregate_list
-
-# -------------------------------------------
-#                 Pipe Syntax
-# -------------------------------------------
-
-
-
+    @classmethod
+    def __parse_aggregate_statement(cls, query_params: dict) -> str:
+        return Parser.__default_syntax
