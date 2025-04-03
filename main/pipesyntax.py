@@ -68,7 +68,6 @@ class Parser:
 
     __default_syntax = "|>"
 
-
     @staticmethod
     def parse_query(query_list: list) -> list:
         '''
