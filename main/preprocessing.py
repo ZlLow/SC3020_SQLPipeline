@@ -7,6 +7,12 @@ from pipesyntax import QueryType, Parser
 
 
 class DBConnection:
+    """
+    .. _db_label:
+
+    Database Object used to connect to Postgres and execute the queries.
+
+    """
     _DEFAULT_DBNAME = "TPC-H"
     _DEFAULT_USERNAME = "postgres"
     _DEFAULT_PASSWORD = "password"
@@ -20,36 +26,51 @@ class DBConnection:
         self._port = port
         self._conn = self._connect(self._dbname, self._username, self._password, self._port)
 
+    def __del__(self):
+        self.close()
+
     def _connect(self, dbname: str, username: str, password: str, port: int):
         """
-        Connects to Postgres SQL database
-        :param dbname:
-        :param username:
-        :param password:
-        :param port:
-        :return:
+        Private method which connects to postgres SQL
+
+        Notes:
+        Does not retry and will throw exception if the database does not connect
+        Initialized when creating DBConnection object
+
+        :param dbname: Name of the database connected (Not the schema)
+        :param username: Name of the username which is used to login into Postgres
+        :param password: Password which is used to login into Postgres
+        :param port: Port number which is used to host the database
+        :return: A Connect object ..function:: psycopg2.connect()
+        Example
+
+        >>> db = DBConnection(dbname="TPC-H", username="postgres", password="SECRET", port=5432)
+
         """
         conn = psycopg2.connect(dbname=dbname, user=username, password=password, port=port)
         return conn
 
-    def execute(self, query, times=0):
+    def execute(self, query, times=3):
         """
-
-        :param query:
-        :param times:
-        :return:
+        Executes the query of the SQL into Postgres
+        :param query: The SQL query which is used to execute
+        :param times: Number of times to execute the query when the query fails. The default is 3 times
         """
-        while times < 3:
+        i = 0
+        while i < times:
             try:
                 with self._conn.cursor() as cur:
                     cur.execute(query)
-                    return cur.fetchone()
+                    return cur.fetchall()
             except:
                 print("Unable to execute")
                 sleep(10)
                 times += 1
 
     def close(self):
+        """
+        Closes the connection to the database
+        """
         self._conn.close()
 
 
@@ -57,52 +78,101 @@ class QEP:
     """
     # Explanation of the variables
     # ============================
-    # Hash Cond =
+    # Hash Cond = The condition which is used for join condition
     # Filter = Where Statement that evaluates condition that returns multiple statement
     # Relation Name = Name of the table used
     # Index Name = Name of index
     # Index Cond = Where Statement which only evaluates boolean condition
-    # Scan Direction = Direction for the
-    # Join Filter = Join condition
+    # Scan Direction = Direction of the select query. (Is used only when 1 column is sorted)
+    # Join Filter = Join condition when the condition is RIGHT JOIN
     # Join Type = Direction of the Join (Left, Right, Full)
+    # Actual Total Time = Execution Time for each statement
     """
     _conditions = ["Hash Cond", "Filter", "Relation Name", "Index Name", "Index Cond", "Scan Direction",
                    "Join Filter", "Join Type", "Actual Total Time"]
 
     @classmethod
-    def get_QEP(cls, query: str, db: DBConnection) -> tuple[list, float]:
+    def unwrap(cls, query: str, db: DBConnection) -> tuple[list, float]:
+        """
+        .. _unwrap_label:
+
+        Unwraps the Query Execution Plan from the SQL
+
+        Note:
+        Does reshape and flatten the JSON into a list
+
+        :param query: A string which is used to represent SQL query
+        :param db: The database object which is used to connect to the Postgres database :ref: `db_label`
+        :return: Returns a tuple which contains the query list and the total execution time as a float
+
+        Example
+        >>> (qep_example, example_execution_time) = QEP.unwrap("SELECT * from customer LIMIT 100", db)
+
+        >>> print(qep_example)
+        [
+            { LIMIT: { "Plan Row": 100, "Actual Total Time": 0.55 }
+            },
+            { SELECT: {"Index Name": "cust_pkey", "Relation Name": "customer",
+                      "Scan Direction": "Forward", "Actual Total Time": 1.205}
+            }
+        ]
+        >>> print(example_execution_time)
+        1.755
+
+        Coupled Functions:
+        - _unwrap_QEP(..) :ref: `unwrap_internal_label`
+        - _merge_queries(..) :ref: `merge_label`
+        - _clean_and_replace_variables(..) :ref: `clean_label`
+        - _inject_queries(..) :ref: `inject_label`
+
         """
 
-        :param query:
-        :param db:
-        :param times:
-        :return:
-        """
         query = sqlglot.transpile(query, write="postgres", read="postgres", pretty=True)[0]
         alias = cls._retrieve_alias(query)
         qep_query = "EXPLAIN (ANALYZE, FORMAT JSON)" + query
         query_plan_json = db.execute(qep_query)
         execution_time = query_plan_json[0][0]["Execution Time"]
         query_list = cls._unwrap_QEP(query_plan_json[0][0])
-        # Inject the column alias from the most recent query line
-        cls._clean_and_replace_variables(query_list, alias)
         # Merge Join queries with Select
         cls._merge_queries(query_list)
+        # Inject the column alias from the most recent query line
+        cls._clean_and_replace_variables(query_list, alias)
+        # Inject select into aggregate if any
+        cls._inject_queries(query_list, alias)
         return query_list, execution_time
 
     @classmethod
-    def _unwrap_QEP(cls, query_plan: dict) -> list:
+    def _unwrap_QEP(cls, query_plan: dict) -> list[dict]:
         """
+        .. ref::_unwrap_internal_label:
 
-        :param query_plan:
+
+        An internal method used to disassemble the QEP and retrieve the relevant fields from _conditions
+
+        Notes:
+        Reshape the QEP into an array of dictionary
+        Simulates a JSON dictionary with nested dictionary within a dictionary
+
+        :param query_plan: The JSON dictionary which contains the nested statements
         :return: List of nested dictionary. View example to see the structure of the output.
 
         Example
 
-        >>>
-        Expected Output
-        >>>
+        >>> print(cls._unwrap_QEP(
+        >>> {"Plan": {"Actual Total Time": 1.275, "Plans":
+        >>>     [{"Node Type": "Limit", "Actual Total Time": 0.55, "Plan Row": 100, "Plans":
+        >>>         [{"Node Type": "Seq Index Scan", "Actual Total Time": 1}]}]}})
+
+        [
+            { LIMIT: { "Plan Row": 100, "Actual Total Time": 0.55 }
+            },
+            { SELECT: {"Index Name": "cust_pkey", "Relation Name": "customer",
+                      "Scan Direction": "Forward", "Actual Total Time": 1.205}
+            }
+        ]
+
         """
+
         query_plan = query_plan["Plan"]
         query_list = []
         plan_queue = queue.Queue()
@@ -132,20 +202,41 @@ class QEP:
     @classmethod
     def _merge_queries(cls, query_list: list[dict]) -> None:
         """
+        .. ref::merge_label:
+
+        Merges the query of any JOIN condition with the closest SELECT statement
+
+        Notes:
+
+        A simple implementation that checks whether there is a JOIN statement.
+        It will merge with the next statement (Does not check for the closest SELECT statement)
+        Lazily assume that the next statemnet is a SELECT statement
 
         :param query_list:
         :return:
+
+        Example
+        >>> cls._merge_queries(query_list=[{"JOIN":{...}}, {"SELECT": {...}}, {"SELECT": {...}}])
+
+        TODO:
+        should check for the closest SELECT statement. Will implement ltr
+        Might case Error Statement in two scenarios
+            - When JOIN statement is the last statement (i.e.: [LIMIT, SORT, JOIN])
+            - When next statement is not a select statement (i.e [JOIN, LIMIT])
+
         """
+
         remove_join_list = []
         for i in range(len(query_list)):
-            if query_list[i].get(QueryType.JOIN, None) is not None:
-                remove_join_list.append(i)
+            query = query_list[i].get(QueryType.JOIN, None)
+            if query is not None:
                 if i + 1 <= len(query_list):
-                    query_select = [*query_list[i].values()][0]
-                    query_list[i+1].update(query_select)
+                    remove_join_list.append(i+1)
+                    query_select = list(query_list[i+1].values())[0]
+                    query["Actual Total Time"] = query["Actual Total Time"] + query_select["Actual Total Time"]
+                    query.update(query_select)
         for i in remove_join_list:
             query_list.pop(i)
-
 
     @classmethod
     def _retrieve_alias(cls, query: str) -> dict:
@@ -156,10 +247,18 @@ class QEP:
         :return: A dictionary which maps the attribute to its alias
 
         Example
-            >>> retrieve_alias(query="SELECT COUNT(c_key) as c FROM customer")
-            Expected Output
-            >>> {"c": "count(c_key)"}
+            >>> retrieve = cls._retrieve_alias(query="SELECT c_count, count(*) AS custdist FROM"
+            >>>                                      "(SELECT c_custkey, count(o_orderkey) FROM customer"
+            >>>                                      "LEFT OUTER JOIN orders ON c_custkey = o_custkey"
+            >>>                                      "AND o_comment not like '%unusual%packages%' "
+            >>>                                      "GROUP BY c_custkey ) as c_orders (c_custkey, c_count) "
+            >>>                                      "GROUP BY c_count "
+            >>>                                      "ORDER BY custdist DESC, c_count DESC;")
+            >>> print(retrieve)
+            {"c_count": "count(o_orderkey)", "custdist": "count(*)", "c_custkey": "c_custkey" }
+
         """
+
         # Sanitize the attribute and the alias
         # will keep the column name if alias is empty
         parsed = sqlglot.parse_one(query)
@@ -175,17 +274,28 @@ class QEP:
             # Get all the columns from the select
             key_column_names = tuple(str(s).lower() for s in subquery.selects)
             aliases.update(dict(zip(alias_column_names, key_column_names)))
-        print(aliases)
         return aliases
 
     @classmethod
-    def _clean_and_replace_variables(cls, query_list: list[dict[dict]], aliases: dict) -> None:
+    def _clean_and_replace_variables(cls, query_list: list[dict], aliases: dict) -> None:
+        """
+        .. ref::clean_label:
+
+        Combination of removing tables from columns and adding column alias into the variable
+
+        Notes:
+
+        This method updates the object in the parameters (Not a good practice)
+
+        :param query_list: List of query which simulates a JSON list
+        :param aliases: A dictionary of items which contains the alias (key) and the column name (value)
+
+        Example
+        >>> cls._clean_and_replace_variables(query_list=[{"JOIN":{...}}, {"SELECT": {...}}, {"SELECT": {...}}],
+        >>>                                 aliases={"c_count": "count(o_orderkey)", "custdist": "count(*)", "c_custkey": "c_custkey" })
+
         """
 
-        :param query_list:
-        :param aliases:
-        :return:
-        """
         for query in query_list:
             # Deconstructing the nested dictionary
             query_variables = list(query.values())[0]
@@ -201,21 +311,47 @@ class QEP:
 
     @classmethod
     def _add_table_alias(cls, aliases: dict, variable_string: str) -> str:
-        '''
+        """
+        .. ref::_add_table_label:
 
-        :param aliases:
-        :param variable_string:
-        :return:
-        '''
+        Add Alias into the respective column name based on the aliases
+
+        :param aliases: A dictionary of items which contains the alias (key) and the column name (value)
+        :param variable_string: The variable name that is obtained from QEP
+        :return: The string which is replaced by the alias or the original value
+
+        Example:
+        >>> print(cls._add_table_alias(aliases={"custdist": "count(*)"}, variable_string="count(*)"))
+        custdist
+        """
         temp_var = next((items for items in aliases.items() if items[1] in variable_string), None)
         return variable_string.replace(temp_var[1], temp_var[0]) if temp_var is not None else variable_string
 
     @classmethod
     def _remove_tables_from_variables(cls, variable_string: str) -> str:
         """
+        .. ref:_remove_table_label:
 
-        :param variable_string:
-        :return:
+        Removes the additional tables from the column names
+
+        Notes:
+        This function is simplistic in its implementation.
+        It does not check whether it is necessary to remove the table
+        It checks for 2 conditions:
+         - Whether a full stop is found
+         - Whether a bracket is found before the full stop
+        If it satisfies the two conditions:
+            - Remove any substring from ( and .
+        else If it satisfies the . condition
+            - Remove any substring before .
+        else
+            - Retains the original value
+
+        :param variable_string: Value which is used to check whether the value contains any of the above condition
+        :return: A string value
+
+        Example
+
         """
         full_stop_index = variable_string.find(".")
         bracket_index = variable_string.rfind("(", 0, full_stop_index)
@@ -229,11 +365,35 @@ class QEP:
             temp_values = variable_string
         return temp_values
 
+    @classmethod
+    def _inject_queries(cls, query_list: list, alias: dict):
+        """
+        :param query_list:
+        :param alias:
+        :return:
+
+        TODO
+        Inject SELECT queries into either AGGREGATE function or toss them into select statement?
+        """
+        print(alias)
+        pass
+
 
 def get_system_args():
     '''
     Retrieve variables from command line
-    :return: Default value of db connection or variables from command line
+    Note:
+
+    Require precise number of variables (4)
+
+    :return: None when the variables do not match the number of variables
+
+    Example
+
+    >>> print(get_system_args())
+    ("TPC-H", "username", "password", "5124")
+
+
     '''
     print("Retrieving variables from command line")
     if len(sys.argv) != 4:
@@ -245,19 +405,19 @@ def get_system_args():
 
 def example():
     sys_arg = get_system_args()
-    db = DBConnection() if sys_arg is None else DBConnection(sys_arg[0], sys_arg[1], sys_arg[2], sys_arg[3])
-    (qep_list, execution_time) = QEP.get_QEP(
+    db = DBConnection() if sys_arg is None else DBConnection(sys_arg[0], sys_arg[1], sys_arg[2], int(sys_arg[3]))
+    (qep_list, execution_time) = QEP.unwrap(
         "SELECT c_count, count(*) AS custdist FROM (SELECT c_custkey, count(o_orderkey) FROM customer "
         "LEFT OUTER JOIN orders ON c_custkey = o_custkey AND o_comment not like '%unusual%packages%' "
         "GROUP BY c_custkey ) as c_orders (c_custkey, c_count) "
         "GROUP BY c_count "
         "ORDER BY custdist DESC, c_count DESC;"
         , db)
-    # qep_list = get_QEP(
+    # (qep_list, execution_time) = QEP.unwrap(
     #     "SELECT c_custkey FROM customer "
     #     "WHERE c_acctbal > 100 "
     #     "ORDER BY c_custkey DESC, c_acctbal "
-    #     "LIMIT 100;", cur)
+    #     "LIMIT 100;", db)
     print(qep_list)
     print(execution_time)
     print(Parser.parse_query(qep_list))

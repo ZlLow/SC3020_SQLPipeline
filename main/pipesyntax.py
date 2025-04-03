@@ -70,11 +70,11 @@ class Parser:
 
     @staticmethod
     def parse_query(query_list: list) -> list:
-        '''
+        """"
         Parse Query parses the sanitized dictionary of queries and returns the pipe syntax
         :param query_list:
         :return:
-        '''
+        """
         order = []
         for query in query_list:
             order.append(Parser.sanitize_query(query))
@@ -82,11 +82,11 @@ class Parser:
 
     @staticmethod
     def sanitize_query(query_dict: dict) -> str:
-        '''
+        """
         Sanitize the query and force the enumeration into the respective query type
         :param query_dict: Dictionary which contains the variables and dictionary
         :return: A string which output the parsed statement
-        '''
+        """
         # Retrieve the key
         query_key = next(iter(query_dict))
         query = QueryType(query_key)
