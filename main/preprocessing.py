@@ -6,6 +6,7 @@ from time import sleep
 import psycopg2
 import sqlglot
 from psycopg2._psycopg import QueryCanceledError
+from psycopg2.errors import UndefinedTable, UndefinedColumn
 from sqlglot import Expression
 
 from pipesyntax import QueryType, Aggregate, Parser, Operator
@@ -22,20 +23,21 @@ class DBConnection:
     _DEFAULT_USERNAME = "postgres"
     _DEFAULT_PASSWORD = "password"
     _DEFAULT_PORT = 5432
-    _DEFAULT_TIMEOUT = 5000
+    _DEFAULT_TIMEOUT = 1000
 
     def __init__(self, dbname: str = _DEFAULT_DBNAME, username: str = _DEFAULT_USERNAME,
-                 password: str = _DEFAULT_PASSWORD, port: int = _DEFAULT_PORT):
+                 password: str = _DEFAULT_PASSWORD, port: int = _DEFAULT_PORT, options: int = _DEFAULT_TIMEOUT):
         self._dbname = dbname
         self._username = username
         self._password = password
         self._port = port
-        self._conn = self._connect(self._dbname, self._username, self._password, self._port)
+        self._options = options
+        self._conn = self._connect(self._dbname, self._username, self._password, self._port, self._options)
 
     def __del__(self):
         self.close()
 
-    def _connect(self, dbname: str, username: str, password: str, port: int, option: int):
+    def _connect(self, dbname: str, username: str, password: str, port: int, options: int):
         """
         Private method which connects to postgres SQL
 
@@ -44,16 +46,17 @@ class DBConnection:
         Initialized when creating DBConnection object
 
         :param dbname: Name of the database connected (Not the schema)
-        :param username: Name of the username which is used to login into Postgres
-        :param password: Password which is used to login into Postgres
+        :param username: Name of the username which is used to log in into Postgres
+        :param password: Password which is used to log in into Postgres
         :param port: Port number which is used to host the database
+        :param options: The option for timeout
         :return: A Connect object ..function:: psycopg2.connect()
         Example
 
-        >>> db = DBConnection(dbname="TPC-H", username="postgres", password="SECRET", port=5432)
+        >>> db = DBConnection(dbname="TPC-H", username="postgres", password="SECRET", port=5432, options=5000)
 
         """
-        conn = psycopg2.connect(dbname=dbname, user=username, password=password, port=port,  options=f'-c statement_timeout {option}')
+        conn = psycopg2.connect(dbname=dbname, user=username, password=password, port=port,  options=f"-c statement_timeout={options}")
         return conn
 
     def execute(self, query, times=3):
@@ -62,9 +65,7 @@ class DBConnection:
         :param query: The SQL query which is used to execute
         :param times: Number of times to execute the query when the query fails. The default is 3 times
         """
-        i = 0
-        error = None
-        while i < times:
+        while times > 0:
             try:
                 with self._conn.cursor() as cur:
                     cur.execute(query)
@@ -72,16 +73,17 @@ class DBConnection:
             except QueryCanceledError:
                 error = QueryCanceledError("Invalid SQL. Please ensure that the SQL is valid.")
                 print("Unable to execute in time. Retrying execution...")
+                self._conn.rollback()
                 sleep(10)
-                times += 1
-            except:
+                times -= 1
+            except (UndefinedTable, UndefinedColumn):
                 error = sqlglot.TokenError("Missing SQL statement")
                 print("Error in executing statement. Retrying execution...")
+                self._conn.rollback()
                 sleep(10)
-                times += 1
-        if i >= times:
-            print("Please ensure that the query is a valid!")
-            raise error
+                times -= 1
+        print("Please ensure that the query is a valid!")
+        raise error
 
     def close(self):
         """
@@ -579,11 +581,16 @@ def example():
     sys_arg = get_system_args()
     db = DBConnection() if sys_arg is None else DBConnection(sys_arg[0], sys_arg[1], sys_arg[2], int(sys_arg[3]))
 
+    # Standard SQL
     #query = "SELECT c_count, count(*) AS custdist FROM (SELECT c_custkey, count(o_orderkey) FROM customer INNER JOIN orders ON c_custkey = o_custkey AND o_comment not like '%unusual%packages%' GROUP BY c_custkey) as c_orders (c_custkey, c_count) GROUP BY c_count ORDER BY custdist DESC, c_count DESC;"
-    #query = "SELECT c_acctbal, COUNT(*) as custdist FROM customer RIGHT JOIN orders o on o.o_custkey = customer.c_custkey WHERE c_acctbal > 100 OR c_custkey = 1 GROUP BY c_custkey ORDER BY c_custkey DESC LIMIT 100;"
-    #query =    "SELECT c_custkey, SUM(c_acctbal) as total_bal FROM customer LEFT JOIN orders ON orders.o_custkey = customer.c_custkey WHERE c_acctbal > 100 GROUP BY c_custkey ORDER BY c_custkey LIMIT 100"
-    query = "SELECT c_custkey, SUM(c_acctbal) as total_bal FROM customer LEFT JOIN orders on customer.c_custkey = orders.o_custkey GROUP BY c_custkey ORDER BY c_custkey LIMIT 100"
+    # Simple SQL
+    #query = "SELECT c_custkey, SUM(c_acctbal) as total_bal FROM customer LEFT JOIN orders on customer.c_custkey = orders.o_custkey GROUP BY c_custkey ORDER BY c_custkey LIMIT 100"
+    # Unoptimized SQL
     #query = "SELECT c_custkey, sum(c_acctbal), c_address FROM customer where c_acctbal > 100 GROUP BY c_custkey, c_acctbal ORDER BY c_acctbal LIMIT 100"
+    # Invalid SQL
+    #query = "SELECT c_count, count(*) AS custdist FROM (SELECT c_custkey, count(o_orderkey) FROM customer INNER JOIN orders ON c_custkey = o_custkey OR o_comment not like '%unusual%packages%' GROUP BY c_custkey) as c_orders (c_custkey, c_count) GROUP BY c_count ORDER BY custdist DESC, c_count DESC;"
+    # Broken SQL
+    query = "SELECT * from t"
     (qep_list, execution_time) = QEP.unwrap(query, db)
     print(Parser.parse_query(qep_list))
 
