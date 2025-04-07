@@ -43,12 +43,12 @@ class Aggregate(enum.Enum, metaclass=EnumMeta):
 class Operator(enum.Enum, metaclass=EnumMeta):
     EQUAL = "="
     NOTEQUAL = "!="
-    LESSTHAN = "<"
-    GREATERTHAN = ">"
-    NOTLIKE = "!~~"
+    LESS_THAN = "<"
+    GREATER_THAN = ">"
+    NOT_LIKE = "!~~"
     NOT = "<>"
-    LESSTHANOREQUAL = "<="
-    GREATERTHANOREQUAL = ">="
+    LESS_THAN_OR_EQUAL = "<="
+    GREATER_THAN_OR_EQUAL = ">="
     AND = "AND"
     OR = "OR"
 
@@ -57,12 +57,13 @@ class Operator(enum.Enum, metaclass=EnumMeta):
 
     @classmethod
     def to_string(cls, value: str):
-        return next(iter(list(k for k, v in cls.__members__.items() if str(v.value) == value)), "None")
+        return next(iter(list(k.replace("_", " ") for k, v in cls.__members__.items() if str(v.value) == value)), "None")
 
 
 class QueryType(enum.Enum):
     SELECT = "SELECT"
     FROM = "SCAN"
+    WHERE = "WHERE"
     JOIN = "JOIN"
     ORDER = "SORT"
     LIMIT = "LIMIT"
@@ -87,19 +88,19 @@ class QueryType(enum.Enum):
 
 
 class Parser:
-
     __default_syntax = "|>"
 
     @staticmethod
-    def parse_query(query_list: list) -> list:
+    def parse_query(query_list: list):
         """"
         Parse Query parses the sanitized dictionary of queries and returns the pipe syntax
         :param query_list:
-        :return:
+        :return: tuple(str,float)
         """
+
         order = []
-        for query in query_list:
-            order.append(Parser.sanitize_query(query))
+        for qep in query_list:
+            order.append(Parser.sanitize_query(qep))
         output = ""
         order.reverse()
         for o in order:
@@ -125,6 +126,8 @@ class Parser:
                 pipe_syntax = Parser.__parse_join_statement(query_params)
             case QueryType.FROM:
                 pipe_syntax = Parser.__parse_from_statement(query_params)
+            case QueryType.WHERE:
+                pipe_syntax = Parser.__parse_where_statement(query_params)
             case QueryType.ORDER:
                 pipe_syntax = Parser.__parse_order_statement(query_params)
             case QueryType.LIMIT:
@@ -135,7 +138,7 @@ class Parser:
 
     @classmethod
     def __parse_select_statement(cls, query_params: dict) -> str:
-        return f"{Parser.__default_syntax} SELECT {query_params['Index Names']} \n"
+        return f"{Parser.__default_syntax} SELECT {query_params['Index Name']} \n"
 
     @classmethod
     def __parse_from_statement(cls, query_params: dict) -> str:
@@ -143,10 +146,15 @@ class Parser:
 
     @classmethod
     def __parse_join_statement(cls, query_params: dict) -> str:
-        output = f"{Parser.__default_syntax} {query_params['Join Type']} JOIN ON {query_params['Hash Cond']}"
+        condition = next(iter(map(query_params.get,filter(lambda item: "Cond" in item, query_params))),None)
+        output = f"{Parser.__default_syntax} {query_params['Join Type']} JOIN ON {condition}"
         if query_params.get("Filter", None) is not None:
             output += f" AND {query_params['Filter']}"
         return output + f"\n Total Time: {query_params['Actual Total Time']} \n"
+
+    @classmethod
+    def __parse_where_statement(cls, query_params: dict) -> str:
+        return f"{Parser.__default_syntax} WHERE {query_params['Index Name']} \n"
 
     @classmethod
     def __parse_order_statement(cls, query_params: dict) -> str:
