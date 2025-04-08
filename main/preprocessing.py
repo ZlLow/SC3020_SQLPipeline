@@ -23,7 +23,7 @@ class DBConnection:
     _DEFAULT_USERNAME = "postgres"
     _DEFAULT_PASSWORD = "password"
     _DEFAULT_PORT = 5432
-    _DEFAULT_TIMEOUT = 1000
+    _DEFAULT_TIMEOUT = 5000
 
     def __init__(self, dbname: str = _DEFAULT_DBNAME, username: str = _DEFAULT_USERNAME,
                  password: str = _DEFAULT_PASSWORD, port: int = _DEFAULT_PORT, options: int = _DEFAULT_TIMEOUT):
@@ -56,7 +56,8 @@ class DBConnection:
         >>> db = DBConnection(dbname="TPC-H", username="postgres", password="SECRET", port=5432, options=5000)
 
         """
-        conn = psycopg2.connect(dbname=dbname, user=username, password=password, port=port,  options=f"-c statement_timeout={options}")
+        conn = psycopg2.connect(dbname=dbname, user=username, password=password, port=port,
+                                options=f"-c statement_timeout={options}")
         return conn
 
     def execute(self, query, times=3):
@@ -108,7 +109,8 @@ class QEP:
     # Join Type = Direction of the Join (Left, Right, Full)
     # Actual Total Time = Execution Time for each statement
     """
-    _conditions = ["Hash Cond", "Merge Cond","Partial Mode", "Filter", "Relation Name", "Index Name", "Index Cond", "Scan Direction",
+    _conditions = ["Hash Cond", "Merge Cond", "Partial Mode", "Filter", "Relation Name", "Index Name", "Index Cond",
+                   "Scan Direction",
                    "Join Filter", "Join Type", "Actual Total Time"]
 
     @classmethod
@@ -228,7 +230,7 @@ class QEP:
             plans = plan_queue.get()
             try:
                 query = QueryType(plans["Node Type"])
-            except AttributeError:
+            except ValueError:
                 # Skip non-related Queries
                 query = None
             variable_queries = dict()
@@ -262,7 +264,6 @@ class QEP:
 
         A simple implementation that checks whether there is a JOIN statement.
         It will merge with the next statement (Does not check for the closest FROM statement)
-        Lazily assume that the next statemnet is a FROM statement
 
         :param query_list:
         :return:
@@ -282,10 +283,11 @@ class QEP:
         for i in range(len(query_list)):
             query = query_list[i].get(QueryType.JOIN, None)
             if query is not None:
-                if i + 1 <= len(query_list):
+                if i + 1 <= len(query_list) and query_list[i + 1].get(QueryType.FROM, None) is not None:
                     remove_join_list.append(i + 1)
                     query_select = list(query_list[i + 1].values())[0]
                     query["Actual Total Time"] = query["Actual Total Time"] + query_select["Actual Total Time"]
+                    # Join Type in query plan displays which side of the table will be joined.
                     if query["Join Type"] == "RIGHT":
                         query["Join Type"] = "LEFT"
                     elif query["Join Type"] == "LEFT":
@@ -469,25 +471,26 @@ class QEP:
         alias_list = list((k, v) for k, v in temp_alias.items() if v in Aggregate)
         alias_list.reverse()
         aggregate_list = list(filter(lambda item: QueryType.AGGREGATE in item, query_list))
-        first_aggregate_index = next((i for i in reversed(range(len(query_list))) if query_list[i].get(QueryType.AGGREGATE,None) is not None), None)
-        select_list = [k for k, v in temp_alias.items() if v not in Aggregate]
+        first_index = next((i for i in (range(len(query_list)))
+                            if query_list[i].get(QueryType.FROM, None) is not None or
+                            query_list[i].get(QueryType.JOIN, None) is not None)
+                           , None)
+        select_list = [v for k, v in temp_alias.items() if v not in Aggregate]
         if aggregate_list:
             for i in range(len(aggregate_list)):
                 if i < len(alias_list):
                     if alias_list[i][0] != alias_list[i][1]:
-                        aggregate_list[i][QueryType.AGGREGATE].update({"Index Name": f"{alias_list[i][1]} AS {alias_list[i][0]}"})
+                        aggregate_list[i][QueryType.AGGREGATE].update(
+                            {"Index Name": f"{alias_list[i][1]} AS {alias_list[i][0]}"})
                     else:
                         aggregate_list[i][QueryType.AGGREGATE].update({"Index Name": f"{alias_list[i][1]}"})
         # TODO
         # ===============================================
-        # This solution might not be optimal as it will always insert the select statement next to the FROM statement
-        # if no aggregation is found.
+        # This solution might not be optimal as it will always insert the select statement next to the FROM/JOIN statement
         # This might not be true if extend if inserted
         if select_list:
-            if first_aggregate_index is not None:
-                query_list.insert(first_aggregate_index+1, {QueryType.SELECT: {"Index Name": f"{','.join(select_list)}"}})
-            else:
-                query_list.insert(-1, {QueryType.SELECT: {"Index Name": f"{','.join(select_list)}"}})
+            if first_index is not None:
+                query_list.insert(first_index, {QueryType.SELECT: {"Index Name": f"{','.join(select_list)}"}})
 
     @classmethod
     def __retrieve_subquery_alias(cls, parsed: Expression) -> dict:
@@ -529,7 +532,7 @@ class QEP:
         """
         from_range = [next(i for i, item in enumerate(query_list) if item.get(QueryType.FROM) is not None)]
         for index in from_range:
-            where_condition = query_list[index].get("Filter", None)
+            where_condition = query_list[index][QueryType.FROM].get("Filter", None)
             if where_condition is not None:
                 query_list.insert(index, {QueryType.WHERE: {"Index Name": where_condition}})
 
@@ -545,7 +548,9 @@ def get_qep(query: str, db: DBConnection):
 
 def validate_query(query: str):
     try:
-        transpiled = sqlglot.transpile(query, write="postgres", read="postgres", pretty=True, error_level=sqlglot.ErrorLevel.RAISE)[0]
+        transpiled = \
+        sqlglot.transpile(query, write="postgres", read="postgres", pretty=True, error_level=sqlglot.ErrorLevel.RAISE)[
+            0]
         parsed = sqlglot.parse_one(transpiled)
         return parsed
     except sqlglot.ParseError:
@@ -582,15 +587,17 @@ def example():
     db = DBConnection() if sys_arg is None else DBConnection(sys_arg[0], sys_arg[1], sys_arg[2], int(sys_arg[3]))
 
     # Standard SQL
-    #query = "SELECT c_count, count(*) AS custdist FROM (SELECT c_custkey, count(o_orderkey) FROM customer INNER JOIN orders ON c_custkey = o_custkey AND o_comment not like '%unusual%packages%' GROUP BY c_custkey) as c_orders (c_custkey, c_count) GROUP BY c_count ORDER BY custdist DESC, c_count DESC;"
+    # query = "SELECT c_count, count(*) AS custdist FROM (SELECT c_custkey, count(o_orderkey) FROM customer INNER JOIN orders ON c_custkey = o_custkey AND o_comment not like '%unusual%packages%' GROUP BY c_custkey) as c_orders (c_custkey, c_count) GROUP BY c_count ORDER BY custdist DESC, c_count DESC;"
     # Simple SQL
-    #query = "SELECT c_custkey, SUM(c_acctbal) as total_bal FROM customer LEFT JOIN orders on customer.c_custkey = orders.o_custkey GROUP BY c_custkey ORDER BY c_custkey LIMIT 100"
+    query = "SELECT c_custkey, sum(c_acctbal), c_address FROM customer where c_acctbal > 100 GROUP BY c_custkey, c_acctbal ORDER BY c_acctbal LIMIT 100"
     # Unoptimized SQL
-    #query = "SELECT c_custkey, sum(c_acctbal), c_address FROM customer where c_acctbal > 100 GROUP BY c_custkey, c_acctbal ORDER BY c_acctbal LIMIT 100"
+    # query = "SELECT c_custkey, SUM(c_acctbal) as total_bal FROM customer LEFT JOIN orders on customer.c_custkey = orders.o_custkey WHERE c_acctbal > 100 GROUP BY c_custkey ORDER BY c_custkey LIMIT 100"
     # Invalid SQL
-    #query = "SELECT c_count, count(*) AS custdist FROM (SELECT c_custkey, count(o_orderkey) FROM customer INNER JOIN orders ON c_custkey = o_custkey OR o_comment not like '%unusual%packages%' GROUP BY c_custkey) as c_orders (c_custkey, c_count) GROUP BY c_count ORDER BY custdist DESC, c_count DESC;"
+    # query = "SELECT c_count, count(*) AS custdist FROM (SELECT c_custkey, count(o_orderkey) FROM customer INNER JOIN orders ON c_custkey = o_custkey OR o_comment not like '%unusual%packages%' GROUP BY c_custkey) as c_orders (c_custkey, c_count) GROUP BY c_count ORDER BY custdist DESC, c_count DESC;"
     # Broken SQL
-    query = "SELECT * from t"
+    # query = "SELECT * from t"
+    # Duplicate Keys
+    #query = "SELECT customer.c_custkey, orders.o_custkey as c_custkey FROM customer LEFT JOIN orders ON orders.o_custkey = customer.c_custkey WHERE c_acctbal > 100  GROUP BY orders.o_custkey, customer.c_custkey ORDER BY customer.c_custkey"
     (qep_list, execution_time) = QEP.unwrap(query, db)
     print(Parser.parse_query(qep_list))
 
