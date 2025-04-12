@@ -206,6 +206,7 @@ def qep_to_graph_elements(qep_list):
     Output('pipe-syntax-output', 'value'),
     Output('qep-graph', 'elements'),
     Output('qep-graph', 'style'),
+    Output('qep-graph', 'layout'),
     Input('submit-btn', 'n_clicks'),
     State('sql-input', 'value'),
     prevent_initial_call=True
@@ -232,7 +233,16 @@ def transform_sql(n_clicks, sql_input):
             'backgroundColor': '#fdfdfd'
         }
 
-        return pipe_syntax, graph_elements, style
+        # force layout to change on every query to "reset" diagram
+        layout={
+            'name': 'breadthfirst',
+            'directed': True,
+            'spacingFactor': 0.8,
+            'padding': 0,
+            'roots': '[id = "0_LIMIT"]',
+        }
+
+        return pipe_syntax, graph_elements, style, layout
 
     except Exception as e:
         return f"❌ Error: {str(e)}", [], {}
