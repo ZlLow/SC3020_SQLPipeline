@@ -18,3 +18,9 @@ Step 6.2. Run this command in Mac ``python -m ensurepip --upgrade``
 Step 7. Run this command ``pip install -r requirements.txt``
 
 Step 8. Installation should be completed
+
+## Running the Application
+
+Step 1. run ``cd /main``
+
+Step 2. Run ``python project.py``
