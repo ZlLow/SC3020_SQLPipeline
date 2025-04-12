@@ -480,8 +480,8 @@ class QEP:
         where the row will be filtered before retrieving from the columns
         :param query_list: List of query
         """
-        from_range = list(i for i, item in enumerate(query_list) if item.get(QueryType.FROM, None) is not None)
-        for index in from_range:
+        from_range = list(i for i, item in enumerate(query_list) if item.get(QueryType.FROM, None) is not None and item.get(QueryType.FROM).get("Filter", None) is not None)
+        for index in reversed(from_range):
             where_condition = query_list[index][QueryType.FROM].get("Filter", None)
             if where_condition is not None:
                 query_list.insert(index, {QueryType.WHERE: {"Index Name": where_condition}})
@@ -541,17 +541,18 @@ def example():
     db = DBConnection() if sys_arg is None else DBConnection(sys_arg[0], sys_arg[1], sys_arg[2], int(sys_arg[3]))
 
     # Standard SQL
-    # query = "SELECT c_count, count(*) AS custdist FROM (SELECT c_custkey, count(o_orderkey) FROM customer INNER JOIN orders ON c_custkey = o_custkey AND o_comment not like '%unusual%packages%' GROUP BY c_custkey) as c_orders (c_custkey, c_count) GROUP BY c_count ORDER BY custdist DESC, c_count DESC;"
+    #query = "SELECT c_count, count(*) AS custdist FROM (SELECT c_custkey, count(o_orderkey) FROM customer INNER JOIN orders ON c_custkey = o_custkey AND o_comment not like '%unusual%packages%' GROUP BY c_custkey) as c_orders (c_custkey, c_count) GROUP BY c_count ORDER BY custdist DESC, c_count DESC;"
     # Simple SQL
     #query = "SELECT c_custkey, sum(c_acctbal), c_address FROM customer where c_acctbal > 100 GROUP BY c_custkey, c_acctbal ORDER BY c_acctbal LIMIT 100"
     # Unoptimized SQL
-    query = "SELECT c_custkey, SUM(c_acctbal) as total_bal FROM customer LEFT JOIN orders on customer.c_custkey = orders.o_custkey WHERE c_acctbal > 100 GROUP BY c_custkey ORDER BY c_custkey LIMIT 100"
+    #query = "SELECT c_custkey, SUM(c_acctbal) as total_bal FROM customer LEFT JOIN orders on customer.c_custkey = orders.o_custkey WHERE c_acctbal > 100 GROUP BY c_custkey ORDER BY c_custkey LIMIT 100"
     # Invalid SQL
     # query = "SELECT c_count, count(*) AS custdist FROM (SELECT c_custkey, count(o_orderkey) FROM customer INNER JOIN orders ON c_custkey = o_custkey OR o_comment not like '%unusual%packages%' GROUP BY c_custkey) as c_orders (c_custkey, c_count) GROUP BY c_count ORDER BY custdist DESC, c_count DESC;"
     # Broken SQL
     # query = "SELECT * from t"
     # Duplicate Keys
     #query = "SELECT customer.c_custkey, orders.o_custkey as c_custkey FROM customer LEFT JOIN orders ON orders.o_custkey = customer.c_custkey WHERE c_acctbal > 100  GROUP BY orders.o_custkey, customer.c_custkey ORDER BY customer.c_custkey"
+    query = "SELECT c_custkey FROM customer LEFT JOIN orders on customer.c_custkey = orders.o_custkey WHERE c_acctbal > 100 and o_totalprice > 100"
     (qep_list, execution_time) = QEP.unwrap(query, db)
     print(Parser.parse_query(qep_list))
 
