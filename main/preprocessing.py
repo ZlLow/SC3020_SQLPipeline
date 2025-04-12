@@ -143,7 +143,6 @@ class QEP:
 
         Coupled Functions:
         - __unwrap_QEP(..) :ref: `unwrap_internal_label`
-        - __merge_queries(..) :ref: `merge_label`
         - __clean_and_replace_variables(..) :ref: `clean_label`
         - __inject_queries(..) :ref: `inject_label`
         - __inject_where_condition(..) :ref: `inject_where_label`
@@ -158,8 +157,6 @@ class QEP:
         query_list = cls.__unwrap_QEP(query_plan_json[0])
         # This section modifies the QEP dictionary object
         # ====================================
-        # Merge Join queries with Select
-        cls.__merge_queries(query_list)
         # Inject the column alias from the most recent query line
         cls.__clean_and_replace_variables(query_list, alias)
         # Inject select into aggregate if any and aggregation
@@ -220,6 +217,7 @@ class QEP:
             │   ├── SORT
             │   │   ├── JOIN
             │   │   │   ├── FROM
+            │   │   │   └── FROM
         """
 
         query_plan = query_plan["Plan"]
@@ -252,49 +250,6 @@ class QEP:
             if query is not None:
                 query_list.append({query: variable_queries})
         return query_list
-
-    @classmethod
-    def __merge_queries(cls, query_list: list[dict]) -> None:
-        """
-        .. ref::merge_label:
-
-        Merges the query of any JOIN condition with the closest FROM statement
-
-        Notes:
-
-        A simple implementation that checks whether there is a JOIN statement.
-        It will merge with the next statement (Does not check for the closest FROM statement)
-
-        :param query_list:
-        :return:
-
-        Example
-        >>> cls.__merge_queries(query_list=[{"JOIN":{...}}, {"FROM": {...}}, {"FROM": {...}}])
-
-        TODO:
-        should check for the closest FROM statement. Will implement ltr
-        Might case Error Statement in two scenarios
-            - When JOIN statement is the last statement (i.e.: [LIMIT, SORT, JOIN])
-            - When next statement is not a FROM statement (i.e [JOIN, LIMIT])
-
-        """
-
-        remove_join_list = []
-        for i in range(len(query_list)):
-            query = query_list[i].get(QueryType.JOIN, None)
-            if query is not None:
-                if i + 1 <= len(query_list) and query_list[i + 1].get(QueryType.FROM, None) is not None:
-                    remove_join_list.append(i + 1)
-                    query_select = list(query_list[i + 1].values())[0]
-                    query["Actual Total Time"] = query["Actual Total Time"] + query_select["Actual Total Time"]
-                    # Join Type in query plan displays which side of the table will be joined.
-                    if query["Join Type"] == "RIGHT":
-                        query["Join Type"] = "LEFT"
-                    elif query["Join Type"] == "LEFT":
-                        query["Join Type"] = "RIGHT"
-                    query.update(query_select)
-        for i in remove_join_list:
-            query_list.pop(i)
 
     @classmethod
     def __retrieve_alias(cls, query: Expression) -> dict:
@@ -471,10 +426,6 @@ class QEP:
         alias_list = list((k, v) for k, v in temp_alias.items() if v in Aggregate)
         alias_list.reverse()
         aggregate_list = list(filter(lambda item: QueryType.AGGREGATE in item, query_list))
-        first_index = next((i for i in (range(len(query_list)))
-                            if query_list[i].get(QueryType.FROM, None) is not None or
-                            query_list[i].get(QueryType.JOIN, None) is not None)
-                           , None)
         select_list = [v for k, v in temp_alias.items() if v not in Aggregate]
         if aggregate_list:
             for i in range(len(aggregate_list)):
@@ -489,8 +440,7 @@ class QEP:
         # This solution might not be optimal as it will always insert the select statement next to the FROM/JOIN statement
         # This might not be true if extend if inserted
         if select_list:
-            if first_index is not None:
-                query_list.insert(first_index, {QueryType.SELECT: {"Index Name": f"{','.join(select_list)}"}})
+            query_list.insert(0, {QueryType.SELECT: {"Index Name": f"{','.join(select_list)}"}})
 
     @classmethod
     def __retrieve_subquery_alias(cls, parsed: Expression) -> dict:
@@ -530,7 +480,7 @@ class QEP:
         where the row will be filtered before retrieving from the columns
         :param query_list: List of query
         """
-        from_range = [next(i for i, item in enumerate(query_list) if item.get(QueryType.FROM) is not None)]
+        from_range = list(i for i, item in enumerate(query_list) if item.get(QueryType.FROM, None) is not None)
         for index in from_range:
             where_condition = query_list[index][QueryType.FROM].get("Filter", None)
             if where_condition is not None:
@@ -582,6 +532,10 @@ def get_system_args():
         return sys.argv[0], sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
 
 
+def compare_str(s1: any, s2: any) -> bool:
+    return str(s1).lower() == str(s2).lower()
+
+
 def example():
     sys_arg = get_system_args()
     db = DBConnection() if sys_arg is None else DBConnection(sys_arg[0], sys_arg[1], sys_arg[2], int(sys_arg[3]))
@@ -589,9 +543,9 @@ def example():
     # Standard SQL
     # query = "SELECT c_count, count(*) AS custdist FROM (SELECT c_custkey, count(o_orderkey) FROM customer INNER JOIN orders ON c_custkey = o_custkey AND o_comment not like '%unusual%packages%' GROUP BY c_custkey) as c_orders (c_custkey, c_count) GROUP BY c_count ORDER BY custdist DESC, c_count DESC;"
     # Simple SQL
-    query = "SELECT c_custkey, sum(c_acctbal), c_address FROM customer where c_acctbal > 100 GROUP BY c_custkey, c_acctbal ORDER BY c_acctbal LIMIT 100"
+    #query = "SELECT c_custkey, sum(c_acctbal), c_address FROM customer where c_acctbal > 100 GROUP BY c_custkey, c_acctbal ORDER BY c_acctbal LIMIT 100"
     # Unoptimized SQL
-    # query = "SELECT c_custkey, SUM(c_acctbal) as total_bal FROM customer LEFT JOIN orders on customer.c_custkey = orders.o_custkey WHERE c_acctbal > 100 GROUP BY c_custkey ORDER BY c_custkey LIMIT 100"
+    query = "SELECT c_custkey, SUM(c_acctbal) as total_bal FROM customer LEFT JOIN orders on customer.c_custkey = orders.o_custkey WHERE c_acctbal > 100 GROUP BY c_custkey ORDER BY c_custkey LIMIT 100"
     # Invalid SQL
     # query = "SELECT c_count, count(*) AS custdist FROM (SELECT c_custkey, count(o_orderkey) FROM customer INNER JOIN orders ON c_custkey = o_custkey OR o_comment not like '%unusual%packages%' GROUP BY c_custkey) as c_orders (c_custkey, c_count) GROUP BY c_count ORDER BY custdist DESC, c_count DESC;"
     # Broken SQL
