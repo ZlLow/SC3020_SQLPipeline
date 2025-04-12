@@ -127,11 +127,13 @@ app.layout = dbc.Container([
 ], fluid=True, style={'backgroundColor': '#f8f9fa', 'minHeight': '100vh'})
 
 
-def qep_to_graph_elements(qep_list):
+def qep_to_graph_elements(unfiltered_qep_list):
     elements = []
     node_id_map = {}
     node_counter = 0
     join_children_map = {}
+
+    qep_list = [step for step in unfiltered_qep_list if list(step.keys())[0].name != 'WHERE']
 
     for step in qep_list:
         query_type, metadata = list(step.items())[0]
@@ -234,19 +236,18 @@ def transform_sql(n_clicks, sql_input):
         }
 
         # force layout to change on every query to "reset" diagram
-        layout={
+        first_query_type = list(qep_list[0].keys())[0]
+        root_node = f"0_{first_query_type.name}"
+
+        layout = {
             'name': 'breadthfirst',
             'directed': True,
             'spacingFactor': 0.8,
             'padding': 0,
-            'roots': '[id = "0_LIMIT"]',
+            'roots': f'[id = "{root_node}"]'
         }
 
         return pipe_syntax, graph_elements, style, layout
 
     except Exception as e:
         return f"❌ Error: {str(e)}", [], {}
-
-
-if __name__ == '__main__':
-    app.run(debug=True)
