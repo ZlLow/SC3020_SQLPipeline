@@ -38,6 +38,7 @@ app.layout = dbc.Container([
                         showPrintMargin=True,
                         fontSize=14,
                     ),
+                    html.Div(id='error-message', className='mt-2', style={'minHeight': '24px'}),
                     dbc.Button("Submit", id='submit-btn', color="primary", className="mt-3")
                 ], width=4, className="p-2"),
 
@@ -209,6 +210,7 @@ def qep_to_graph_elements(unfiltered_qep_list):
     Output('qep-graph', 'elements'),
     Output('qep-graph', 'style'),
     Output('qep-graph', 'layout'),
+    Output('error-message', 'children'),
     Input('submit-btn', 'n_clicks'),
     State('sql-input', 'value'),
     prevent_initial_call=True
@@ -247,7 +249,8 @@ def transform_sql(n_clicks, sql_input):
             'roots': f'[id = "{root_node}"]'
         }
 
-        return pipe_syntax, graph_elements, style, layout
+        return pipe_syntax, graph_elements, style, layout, ""
 
     except Exception as e:
-        return f"❌ Error: {str(e)}", [], {}
+        return "", [], {}, {}, html.Div(f"❌ Error: {str(e)}", style={"color": "red", "marginTop": "10px"})
+
