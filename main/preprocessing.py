@@ -2,6 +2,7 @@ import copy
 import queue
 import sys
 from time import sleep
+import re
 
 import psycopg2
 import sqlglot
@@ -274,8 +275,9 @@ class QEP:
 
         # Sanitize the attribute and the alias
         # will keep the column name if alias is empty
-        aliases = {str(i.alias).lower() if i.alias != "" else str(i).split()[0].lower(): str(i).split()[0].lower()
-                   for i in query.expressions}
+        aliases = {str(i.alias).lower() if i.alias != "" else str(i).split()[0].lower(): str(i).lower() if re.search(r'over\s*\(', str(i).lower()) else str(i).split()[0].lower()
+                for i in query.expressions}
+        
         subquery_alias = cls.__retrieve_subquery_alias(query)
         aliases.update(subquery_alias)
         return aliases
@@ -386,22 +388,8 @@ class QEP:
         :param variable_string: The string type of the variable which needs to be converted
         :return: A string output of the sanitized query
         """
-        string_list = [string for string in variable_string.split(" ")]
-        result_string = []
-        for string in string_list:
-            if string.find("::") != -1:
-                tmp = string.split("::")
-                result = tmp[0]
-                end_string = tmp[1]
-                closing_bracket = end_string.rfind(")")
-                if closing_bracket != -1 and end_string[closing_bracket] == end_string[-1]:
-                    result += ")"
-                result_string.append(result)
-            elif string in Operator:
-                result_string.append(Operator.to_string(string))
-            else:
-                result_string.append(string)
-        return " ".join(result_string)
+        result_string = re.sub(r'::[^) ]*[) ]',  '', variable_string)
+        return result_string
 
     @classmethod
     def __inject_queries(cls, query: str, query_list: list, alias: dict):
@@ -543,7 +531,7 @@ def example():
     # Standard SQL
     #query = "SELECT c_count, count(*) AS custdist FROM (SELECT c_custkey, count(o_orderkey) FROM customer INNER JOIN orders ON c_custkey = o_custkey AND o_comment not like '%unusual%packages%' GROUP BY c_custkey) as c_orders (c_custkey, c_count) GROUP BY c_count ORDER BY custdist DESC, c_count DESC;"
     # Simple SQL
-    #query = "SELECT c_custkey, sum(c_acctbal), c_address FROM customer where c_acctbal > 100 GROUP BY c_custkey, c_acctbal ORDER BY c_acctbal LIMIT 100"
+    #query = "SELECT c_custkey, sum(c_acctbal) FROM customer where c_acctbal > 100 GROUP BY c_custkey, c_acctbal ORDER BY c_acctbal LIMIT 100"
     # Unoptimized SQL
     #query = "SELECT c_custkey, SUM(c_acctbal) as total_bal FROM customer LEFT JOIN orders on customer.c_custkey = orders.o_custkey WHERE c_acctbal > 100 GROUP BY c_custkey ORDER BY c_custkey LIMIT 100"
     # Invalid SQL
@@ -552,7 +540,15 @@ def example():
     # query = "SELECT * from t"
     # Duplicate Keys
     #query = "SELECT customer.c_custkey, orders.o_custkey as c_custkey FROM customer LEFT JOIN orders ON orders.o_custkey = customer.c_custkey WHERE c_acctbal > 100  GROUP BY orders.o_custkey, customer.c_custkey ORDER BY customer.c_custkey"
-    query = "SELECT c_custkey FROM customer LEFT JOIN orders on customer.c_custkey = orders.o_custkey WHERE c_acctbal > 100 and o_totalprice > 100"
+    
+    
+    #query = "SELECT c_custkey FROM customer LEFT JOIN orders on customer.c_custkey = orders.o_custkey WHERE c_acctbal > 100 and o_totalprice > 100"
+    # Aggregate + HAVING
+    #query="""SELECT o_custkey, COUNT(o_orderkey) AS order_count, AVG(o_totalprice) AS avg_order_price, MIN(o_orderdate) AS first_order_date, MAX(o_orderdate) AS last_order_date FROM orders WHERE o_orderdate >= '1995-01-01' AND o_orderpriority LIKE '%5%' GROUP BY o_custkey HAVING COUNT(o_orderkey) >= 3 ORDER BY avg_order_price DESC LIMIT 20;"""
+    # Window function
+    query = """
+    SELECT c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, RANK() OVER (PARTITION BY c.c_custkey ORDER BY o.o_totalprice DESC) AS price_rank FROM public.customer c JOIN public.orders o ON c.c_custkey = o.o_custkey WHERE o.o_orderdate BETWEEN '1995-01-01' AND '1995-12-31' ORDER BY c.c_name,price_rank;"""
+
     (qep_list, execution_time) = QEP.unwrap(query, db)
     print(Parser.parse_query(qep_list))
 

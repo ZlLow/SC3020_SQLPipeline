@@ -68,6 +68,7 @@ class QueryType(enum.Enum):
     ORDER = "SORT"
     LIMIT = "LIMIT"
     AGGREGATE = "AGGREGATE"
+    WINDOWAGG = "WINDOWAGG"
 
     def __str__(self):
         return self.name
@@ -134,6 +135,8 @@ class Parser:
                 pipe_syntax = Parser.__parse_limit_statement(query_params)
             case QueryType.AGGREGATE:
                 pipe_syntax = Parser.__parse_aggregate_statement(query_params)
+            case QueryType.WINDOWAGG:
+                pipe_syntax = Parser.__parse_window_aggregate_statement(query_params)
         return pipe_syntax
 
     @classmethod
@@ -166,4 +169,12 @@ class Parser:
 
     @classmethod
     def __parse_aggregate_statement(cls, query_params: dict) -> str:
-        return f"{Parser.__default_syntax} AGGREGATE {query_params['Index Name']} GROUP BY {query_params['Group Key']} \n Total Time: {query_params['Actual Total Time']} \n"
+        having_clause = ''
+        if 'Filter' in query_params:
+            having_clause = f"HAVING {query_params['Filter']}"
+
+        out =  f"{Parser.__default_syntax} AGGREGATE {query_params['Index Name']} GROUP BY {query_params['Group Key']} {having_clause}\n Total Time: {query_params['Actual Total Time']} \n"
+        return out 
+    @classmethod
+    def __parse_window_aggregate_statement(cls, query_params: dict) -> str:
+        return f"{Parser.__default_syntax} WINDOWAGG \n Total Time: {query_params['Actual Total Time']} \n"
