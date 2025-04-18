@@ -12,7 +12,6 @@ from sqlglot import Expression
 
 from pipesyntax import QueryType, Aggregate, Parser, Operator
 
-
 class DBConnection:
     """
     .. _db_label:
@@ -162,6 +161,8 @@ class QEP:
         cls.__clean_and_replace_variables(query_list, alias)
         # Inject select into aggregate if any and aggregation
         cls.__inject_queries(query, query_list, alias)
+        # Inject set if any update
+        cls.__inject_set_statement(query, query_list, alias)
         # Inject where condition
         cls.__inject_where_condition(query_list)
         return query_list, execution_time
@@ -468,12 +469,39 @@ class QEP:
         where the row will be filtered before retrieving from the columns
         :param query_list: List of query
         """
-        from_range = list(i for i, item in enumerate(query_list) if item.get(QueryType.FROM, None) is not None and item.get(QueryType.FROM).get("Filter", None) is not None)
-        for index in reversed(from_range):
+        from_range_filter = list(i for i, item in enumerate(query_list) if item.get(QueryType.FROM, None) is not None and item.get(QueryType.FROM).get("Filter", None) is not None)
+        for index in reversed(from_range_filter):
             where_condition = query_list[index][QueryType.FROM].get("Filter", None)
             if where_condition is not None:
                 query_list.insert(index, {QueryType.WHERE: {"Index Name": where_condition}})
+        
+        from_range_index = list(i for i, item in enumerate(query_list) if item.get(QueryType.FROM, None) is not None and item.get(QueryType.FROM).get("Index Cond", None) is not None)
+        for index in reversed(from_range_index):
+            where_condition = query_list[index][QueryType.FROM].get("Index Cond", None)
+            if where_condition is not None:
+                query_list.insert(index, {QueryType.WHERE: {"Index Name": where_condition}})
+            
+    @classmethod   
+    def __inject_set_statement(cls, query: str, query_list: list, alias: dict):
+        """
+        Injects SET statememt where UPDATE exists
+        """
+        update_index = next((i for i, query in enumerate(query_list) if QueryType.UPDATE in query), -1)
+        
+        if update_index != -1:
+            
+            match = re.search(r'\bSET\b\s+(.*?)(?=\bFROM\b|\bWHERE\b|;|$)', query, re.IGNORECASE | re.DOTALL)
+            set_statement = match.group(1).strip()
+            
+            if set_statement is not None:
+                for a in alias:
+                    set_statement = re.sub(rf'\b{re.escape(a)}\b', a.lower(), set_statement, flags=re.IGNORECASE)
+                query_list.insert(update_index, {QueryType.SET: {"Set Statement": set_statement}})
 
+                if update_index - 1 >= 0:
+                    if QueryType.SELECT in query_list[update_index - 1]:
+                        query_list.pop(update_index - 1)
+                        
 
 def flatten(nested_list: list) -> list:
     return [item for sublist in nested_list for item in sublist[0]]
@@ -548,6 +576,9 @@ def example():
     # Window function
     query = """
     SELECT c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, RANK() OVER (PARTITION BY c.c_custkey ORDER BY o.o_totalprice DESC) AS price_rank FROM public.customer c JOIN public.orders o ON c.c_custkey = o.o_custkey WHERE o.o_orderdate BETWEEN '1995-01-01' AND '1995-12-31' ORDER BY c.c_name,price_rank;"""
+
+    # UPDATE SQL statements
+    #query = "UPDATE customer SET c_comment = 'Preferred', c_acctbal = c_acctbal * 1.1 WHERE c_mktsegment = 'FURNITURE';"
 
     (qep_list, execution_time) = QEP.unwrap(query, db)
     print(Parser.parse_query(qep_list))

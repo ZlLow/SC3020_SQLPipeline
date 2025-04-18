@@ -69,6 +69,8 @@ class QueryType(enum.Enum):
     LIMIT = "LIMIT"
     AGGREGATE = "AGGREGATE"
     WINDOWAGG = "WINDOWAGG"
+    UPDATE = "MODIFYTABLE"
+    SET = "SET"
 
     def __str__(self):
         return self.name
@@ -137,6 +139,10 @@ class Parser:
                 pipe_syntax = Parser.__parse_aggregate_statement(query_params)
             case QueryType.WINDOWAGG:
                 pipe_syntax = Parser.__parse_window_aggregate_statement(query_params)
+            case QueryType.UPDATE:
+                pipe_syntax = Parser.__parse_update_statement(query_params)
+            case QueryType.SET:
+                pipe_syntax = Parser.__parse_set_statement(query_params)
         return pipe_syntax
 
     @classmethod
@@ -175,6 +181,15 @@ class Parser:
 
         out =  f"{Parser.__default_syntax} AGGREGATE {query_params['Index Name']} GROUP BY {query_params['Group Key']} {having_clause}\n Total Time: {query_params['Actual Total Time']} \n"
         return out 
+    
     @classmethod
     def __parse_window_aggregate_statement(cls, query_params: dict) -> str:
         return f"{Parser.__default_syntax} WINDOWAGG \n Total Time: {query_params['Actual Total Time']} \n"
+    
+    @classmethod
+    def __parse_update_statement(cls, query_params: dict) -> str:
+        return f"{Parser.__default_syntax} UPDATE {query_params['Relation Name']} \n Total Time: {query_params['Actual Total Time']} \n"
+    
+    @classmethod
+    def __parse_set_statement(cls, query_params: dict) -> str:
+        return f"{Parser.__default_syntax} SET {query_params['Set Statement']} \n"
