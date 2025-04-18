@@ -518,7 +518,13 @@ def validate_query(query: str):
         sqlglot.transpile(query, write="postgres", read="postgres", pretty=True, error_level=sqlglot.ErrorLevel.RAISE)[
             0]
         parsed = sqlglot.parse_one(transpiled)
-        return parsed
+
+        #check that query is DML
+        if parsed is not None:
+            if parsed.key.upper() in {"SELECT", "INSERT", "UPDATE", "DELETE"}:
+                return parsed
+            raise ValueError("Only Data Manipulation Language (DML) queries (SELECT, INSERT, UPDATE, DELETE) are allowed.")
+
     except sqlglot.ParseError:
         error_output = "Error in parsing SQL. Please ensure that the query is valid!"
         raise sqlglot.ParseError(error_output)
@@ -577,8 +583,10 @@ def example():
     query = """
     SELECT c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, RANK() OVER (PARTITION BY c.c_custkey ORDER BY o.o_totalprice DESC) AS price_rank FROM public.customer c JOIN public.orders o ON c.c_custkey = o.o_custkey WHERE o.o_orderdate BETWEEN '1995-01-01' AND '1995-12-31' ORDER BY c.c_name,price_rank;"""
 
-    # UPDATE SQL statements
+    # UPDATE SQL statement
     #query = "UPDATE customer SET c_comment = 'Preferred', c_acctbal = c_acctbal * 1.1 WHERE c_mktsegment = 'FURNITURE';"
+    # DDL statement
+    #query = "DROP TABLE IF EXISTS customer;"
 
     (qep_list, execution_time) = QEP.unwrap(query, db)
     print(Parser.parse_query(qep_list))
