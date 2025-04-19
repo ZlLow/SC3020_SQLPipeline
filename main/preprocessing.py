@@ -389,7 +389,7 @@ class QEP:
         :param variable_string: The string type of the variable which needs to be converted
         :return: A string output of the sanitized query
         """
-        result_string = re.sub(r'::[^) ]*[) ]',  '', variable_string)
+        result_string = re.sub(r'::[^) ]*', '', variable_string)
         return result_string
 
     @classmethod
@@ -585,7 +585,7 @@ def example():
 
     # UPDATE SQL statement
     #query = "UPDATE customer SET c_comment = 'Preferred', c_acctbal = c_acctbal * 1.1 WHERE c_mktsegment = 'FURNITURE';"
-    # DDL statement
+    # DDL statement (not allowed)
     #query = "DROP TABLE IF EXISTS customer;"
 
     (qep_list, execution_time) = QEP.unwrap(query, db)
