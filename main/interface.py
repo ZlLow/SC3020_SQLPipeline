@@ -142,7 +142,13 @@ def qep_to_graph_elements(unfiltered_qep_list):
 
         def fmt(k, v):
             s = str(v)
-            return f"{k}: {s[:40]}..." if len(s) > 40 else f"{k}: {s}"
+            if len(s) > 40:
+                # Add newlines after logical operators for better wrapping
+                s = s.replace(" AND ", "\nAND ")
+                s = s.replace(" OR ", "\nOR ")
+                s = s.replace(" THEN ", "\nTHEN ")
+                s = s.replace(" ELSE ", "\nELSE ")
+            return f"{k}: {s}"
 
         label_lines = [fmt(k, v) for k, v in metadata.items()]
         label = f"{query_type.name}\n" + "\n".join(label_lines)
