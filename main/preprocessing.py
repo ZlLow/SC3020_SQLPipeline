@@ -389,7 +389,7 @@ class QEP:
         :param variable_string: The string type of the variable which needs to be converted
         :return: A string output of the sanitized query
         """
-        result_string = re.sub(r'::[^) ]*', '', variable_string)
+        result_string = re.sub(r'::[^) ]*', ')', variable_string)
         return result_string
 
     @classmethod
@@ -563,7 +563,7 @@ def example():
     db = DBConnection() if sys_arg is None else DBConnection(sys_arg[0], sys_arg[1], sys_arg[2], int(sys_arg[3]))
 
     # Standard SQL
-    #query = "SELECT c_count, count(*) AS custdist FROM (SELECT c_custkey, count(o_orderkey) FROM customer INNER JOIN orders ON c_custkey = o_custkey AND o_comment not like '%unusual%packages%' GROUP BY c_custkey) as c_orders (c_custkey, c_count) GROUP BY c_count ORDER BY custdist DESC, c_count DESC;"
+    query = "SELECT c_count, count(*) AS custdist FROM (SELECT c_custkey, count(o_orderkey) FROM customer INNER JOIN orders ON c_custkey = o_custkey AND o_comment not like '%unusual%packages%' GROUP BY c_custkey) as c_orders (c_custkey, c_count) GROUP BY c_count ORDER BY custdist DESC, c_count DESC;"
     # Simple SQL
     #query = "SELECT c_custkey, sum(c_acctbal) FROM customer where c_acctbal > 100 GROUP BY c_custkey, c_acctbal ORDER BY c_acctbal LIMIT 100"
     # Unoptimized SQL
@@ -580,8 +580,7 @@ def example():
     # Aggregate + HAVING
     #query="""SELECT o_custkey, COUNT(o_orderkey) AS order_count, AVG(o_totalprice) AS avg_order_price, MIN(o_orderdate) AS first_order_date, MAX(o_orderdate) AS last_order_date FROM orders WHERE o_orderdate >= '1995-01-01' AND o_orderpriority LIKE '%5%' GROUP BY o_custkey HAVING COUNT(o_orderkey) >= 3 ORDER BY avg_order_price DESC LIMIT 20;"""
     # Window function
-    query = """
-    SELECT c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, RANK() OVER (PARTITION BY c.c_custkey ORDER BY o.o_totalprice DESC) AS price_rank FROM public.customer c JOIN public.orders o ON c.c_custkey = o.o_custkey WHERE o.o_orderdate BETWEEN '1995-01-01' AND '1995-12-31' ORDER BY c.c_name,price_rank;"""
+    #query = """SELECT c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, RANK() OVER (PARTITION BY c.c_custkey ORDER BY o.o_totalprice DESC) AS price_rank FROM public.customer c JOIN public.orders o ON c.c_custkey = o.o_custkey WHERE o.o_orderdate BETWEEN '1995-01-01' AND '1995-12-31' ORDER BY c.c_name,price_rank;"""
 
     # UPDATE SQL statement
     #query = "UPDATE customer SET c_comment = 'Preferred', c_acctbal = c_acctbal * 1.1 WHERE c_mktsegment = 'FURNITURE';"
